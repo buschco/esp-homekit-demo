@@ -24,6 +24,14 @@
 #define POSITION_STATE_OPENING 1
 #define POSITION_STATE_STOPPED 2
 
+// const int gpio_up = 2;
+// const int gpio_down = 0;
+//Big node mcu
+const int gpio_up = 4;
+const int gpio_down = 0;
+const int on = 0;
+const int off = 1;
+
 TaskHandle_t updateStateTask;
 homekit_characteristic_t current_position;
 homekit_characteristic_t target_position;
@@ -41,27 +49,55 @@ static void wifi_init() {
     sdk_wifi_station_connect();
 }
 
+void gpio_init() {
+    gpio_enable(gpio_up, GPIO_OUTPUT);
+    gpio_write(gpio_up, off);
+    gpio_enable(gpio_down, GPIO_OUTPUT);
+    gpio_write(gpio_down, off);
+}
+
 void update_state() {
+    bool working = false;
+    // gpio_init();
     while (true) {
-        uint8_t position = current_position.value.int_value;
         int8_t direction = position_state.value.int_value == POSITION_STATE_OPENING ? 1 : -1;
+        uint8_t position = current_position.value.int_value;
         int16_t newPosition = position + direction;
 
         printf("position %u, target %u\n", newPosition, target_position.value.int_value);
-
+        if(working == false && direction == 1) {
+            gpio_write(gpio_up, on);
+            working = true;
+            printf("call up with (%u)\n", target_position.value.int_value);
+        } 
+        if(working == false && direction == -1) {
+            gpio_write(gpio_down, on);
+            working = true;
+            printf("call down with (%u)\n", target_position.value.int_value);
+        }
         current_position.value.int_value = newPosition;
         homekit_characteristic_notify(&current_position, current_position.value);
 
         if (newPosition == target_position.value.int_value) {
             printf("reached destination %u\n", newPosition);
+            if(direction == 1) {
+                gpio_write(gpio_up, off);
+                working = false;
+                printf("stop up with (%u)\n", target_position.value.int_value);
+            } 
+            if(direction == -1) {
+                gpio_write(gpio_down, off);
+                working = false;
+                printf("stop down with (%u)\n", target_position.value.int_value);
+            }
             position_state.value.int_value = POSITION_STATE_STOPPED;
             homekit_characteristic_notify(&position_state, position_state.value);
             vTaskSuspend(updateStateTask);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // 1 min 6 sec => 66000 ms => 1% === 660 ms
+        vTaskDelay(pdMS_TO_TICKS(660));
     }
-}
+} 
 
 void update_state_init() {
     xTaskCreate(update_state, "UpdateState", 256, NULL, tskIDLE_PRIORITY, &updateStateTask);
@@ -110,7 +146,6 @@ homekit_accessory_t *accessories[] = {
 };
 
 void on_update_target_position(homekit_characteristic_t *ch, homekit_value_t value, void *context) {
-    printf("Update target position to: %u\n", target_position.value.int_value);
 
     if (target_position.value.int_value == current_position.value.int_value) {
         printf("Current position equal to target. Stopping.\n");
@@ -137,5 +172,6 @@ void user_init(void) {
     wifi_init();
     homekit_server_init(&config);
     update_state_init();
+    gpio_init();
     printf("init complete\n");
 }
