@@ -29,10 +29,15 @@
 //Big node mcu
 const int gpio_up = 4;
 const int gpio_down = 0;
+const int gpio_in_up = 12;
+const int gpio_in_down = 13;
 const int on = 0;
 const int off = 1;
+bool working = false;
+bool disable_relais = false;
 
-TaskHandle_t updateStateTask;
+TaskHandle_t update_state_task;
+TaskHandle_t button_handler_task;
 homekit_characteristic_t current_position;
 homekit_characteristic_t target_position;
 homekit_characteristic_t position_state;
@@ -54,11 +59,42 @@ void gpio_init() {
     gpio_write(gpio_up, off);
     gpio_enable(gpio_down, GPIO_OUTPUT);
     gpio_write(gpio_down, off);
+    gpio_enable(gpio_in_up, GPIO_INPUT);
+    gpio_enable(gpio_in_down, GPIO_INPUT);
+}
+
+void button_handler() {
+    while(true) {
+        int8_t direction = 
+              gpio_read(gpio_in_up) ? 1
+            : gpio_read(gpio_in_down) ? -1
+            : 0;
+        if(direction != 0) {
+            uint8_t position = current_position.value.int_value;
+            int16_t newPosition = position + direction;
+            if(newPosition < 0 || newPosition > 100) {
+                printf("end reached \n");
+                position_state.value.int_value = POSITION_STATE_STOPPED;
+                homekit_characteristic_notify(&position_state, position_state.value);
+                disable_relais = false;
+            } else {
+                printf("manually %s \n", direction == 1 ? "opening" : "closing");
+                disable_relais = true;
+                position_state.value.int_value = direction == 1
+                ? POSITION_STATE_OPENING
+                : POSITION_STATE_CLOSING;
+                current_position.value.int_value = newPosition;
+                target_position.value.int_value = newPosition;
+                homekit_characteristic_notify(&position_state, position_state.value);
+                homekit_characteristic_notify(&current_position, current_position.value);
+                homekit_characteristic_notify(&target_position, target_position.value);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(660));
+    }
 }
 
 void update_state() {
-    bool working = false;
-    // gpio_init();
     while (true) {
         int8_t direction = position_state.value.int_value == POSITION_STATE_OPENING ? 1 : -1;
         uint8_t position = current_position.value.int_value;
@@ -92,16 +128,17 @@ void update_state() {
             }
             position_state.value.int_value = POSITION_STATE_STOPPED;
             homekit_characteristic_notify(&position_state, position_state.value);
-            vTaskSuspend(updateStateTask);
+            vTaskSuspend(update_state_task);
         }
         // 1 min 6 sec => 66000 ms => 1% === 660 ms
         vTaskDelay(pdMS_TO_TICKS(660));
     }
-} 
+}
 
-void update_state_init() {
-    xTaskCreate(update_state, "UpdateState", 256, NULL, tskIDLE_PRIORITY, &updateStateTask);
-    vTaskSuspend(updateStateTask);
+void init_tasks() {
+    xTaskCreate(button_handler, "ButtonHandler", 256, NULL, tskIDLE_PRIORITY, &button_handler_task);
+    xTaskCreate(update_state, "UpdateState", 256, NULL, tskIDLE_PRIORITY, &update_state_task);
+    vTaskSuspend(update_state_task);
 }
 
 void window_covering_identify(homekit_value_t _value) {
@@ -146,19 +183,21 @@ homekit_accessory_t *accessories[] = {
 };
 
 void on_update_target_position(homekit_characteristic_t *ch, homekit_value_t value, void *context) {
-
+    if(disable_relais) {
+        return;
+    }
     if (target_position.value.int_value == current_position.value.int_value) {
         printf("Current position equal to target. Stopping.\n");
         position_state.value.int_value = POSITION_STATE_STOPPED;
         homekit_characteristic_notify(&position_state, position_state.value);
-        vTaskSuspend(updateStateTask);
+        vTaskSuspend(update_state_task);
     } else {
         position_state.value.int_value = target_position.value.int_value > current_position.value.int_value
             ? POSITION_STATE_OPENING
             : POSITION_STATE_CLOSING;
 
         homekit_characteristic_notify(&position_state, position_state.value);
-        vTaskResume(updateStateTask);
+        vTaskResume(update_state_task);
     }
 }
 
@@ -171,7 +210,7 @@ void user_init(void) {
     uart_set_baud(0, 115200);
     wifi_init();
     homekit_server_init(&config);
-    update_state_init();
+    init_tasks();
     gpio_init();
     printf("init complete\n");
 }
