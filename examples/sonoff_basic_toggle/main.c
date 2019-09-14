@@ -43,19 +43,15 @@
 #include "button.h"
 
 // The GPIO pin that is connected to the relay on the Sonoff Basic.
-const int relay_gpio = 12;
-// The GPIO pin that is connected to the LED on the Sonoff Basic.
-const int led_gpio = 13;
+const int relay_gpio = 3; //RX
 // The GPIO pin that is connected to the button on the Sonoff Basic.
-const int button_gpio = 0;
-
+const int button_gpio = 1; //TX but not used
 
 // NEW
 #include "toggle.h"
 // The GPIO pin that is connected to the header on the Sonoff Basic (external switch).
-const int toggle_gpio = 14;
+const int toggle_gpio = 2; //GPIO 2
 void toggle_callback(uint8_t gpio);
-//
 
 
 void switch_on_callback(homekit_characteristic_t *_ch, homekit_value_t on, void *context);
@@ -66,7 +62,6 @@ void relay_write(bool on) {
 }
 
 void led_write(bool on) {
-    gpio_write(led_gpio, on ? 0 : 1);
 }
 
 void reset_configuration_task() {
@@ -98,7 +93,6 @@ homekit_characteristic_t switch_on = HOMEKIT_CHARACTERISTIC_(
 );
 
 void gpio_init() {
-    gpio_enable(led_gpio, GPIO_OUTPUT);
     led_write(false);
     gpio_enable(relay_gpio, GPIO_OUTPUT);
     relay_write(switch_on.value.bool_value);
@@ -130,10 +124,10 @@ void button_callback(uint8_t gpio, button_event_t event) {
 
 // NEW
 void toggle_callback(uint8_t gpio) {
-            printf("Toggling relay due to switch at GPIO %2d\n", gpio);
-            switch_on.value.bool_value = !switch_on.value.bool_value;
-            relay_write(switch_on.value.bool_value);
-            homekit_characteristic_notify(&switch_on, switch_on.value);
+  printf("Toggling relay due to switch at GPIO %2d\n", gpio);
+  switch_on.value.bool_value = !switch_on.value.bool_value;
+  relay_write(switch_on.value.bool_value);
+  homekit_characteristic_notify(&switch_on, switch_on.value);
 }
 //
 
@@ -158,21 +152,21 @@ void switch_identify(homekit_value_t _value) {
     xTaskCreate(switch_identify_task, "Switch identify", 128, NULL, 2, NULL);
 }
 
-homekit_characteristic_t name = HOMEKIT_CHARACTERISTIC_(NAME, "Sonoff Switch");
+homekit_characteristic_t name = HOMEKIT_CHARACTERISTIC_(NAME, "Smart Switch");
 
 homekit_accessory_t *accessories[] = {
     HOMEKIT_ACCESSORY(.id=1, .category=homekit_accessory_category_switch, .services=(homekit_service_t*[]){
         HOMEKIT_SERVICE(ACCESSORY_INFORMATION, .characteristics=(homekit_characteristic_t*[]){
             &name,
-            HOMEKIT_CHARACTERISTIC(MANUFACTURER, "iTEAD"),
+            HOMEKIT_CHARACTERISTIC(MANUFACTURER, "Colin"),
             HOMEKIT_CHARACTERISTIC(SERIAL_NUMBER, "mps"),
-            HOMEKIT_CHARACTERISTIC(MODEL, "Sonoff Basic"),
+            HOMEKIT_CHARACTERISTIC(MODEL, "Switch"),
             HOMEKIT_CHARACTERISTIC(FIRMWARE_REVISION, "0.1.6"),
             HOMEKIT_CHARACTERISTIC(IDENTIFY, switch_identify),
             NULL
         }),
         HOMEKIT_SERVICE(SWITCH, .primary=true, .characteristics=(homekit_characteristic_t*[]){
-            HOMEKIT_CHARACTERISTIC(NAME, "Sonoff Basic"),
+            HOMEKIT_CHARACTERISTIC(NAME, "Smart Switch"),
             &switch_on,
             NULL
         }),
@@ -183,7 +177,7 @@ homekit_accessory_t *accessories[] = {
 
 homekit_server_config_t config = {
     .accessories = accessories,
-    .password = "190-11-978"    //changed tobe valid
+    .password = "210-21-998"    //changed tobe valid
 //    .password = "111-11-111"    //default easy
 };
 
@@ -194,13 +188,13 @@ void on_wifi_ready() {
 void create_accessory_name() {
     uint8_t macaddr[6];
     sdk_wifi_get_macaddr(STATION_IF, macaddr);
-    
-    int name_len = snprintf(NULL, 0, "Sonoff Basic %02X:%02X:%02X",
+
+    int name_len = snprintf(NULL, 0, "Smart Switch %02X:%02X:%02X",
             macaddr[3], macaddr[4], macaddr[5]);
     char *name_value = malloc(name_len+1);
-    snprintf(name_value, name_len+1, "Sonoff Basic %02X:%02X:%02X",
+    snprintf(name_value, name_len+1, "Smart Switch %02X:%02X:%02X",
             macaddr[3], macaddr[4], macaddr[5]);
-    
+
     name.value = HOMEKIT_STRING(name_value);
 }
 
@@ -208,15 +202,15 @@ void create_accessory_name() {
 void user_init(void) {
     uart_set_baud(0, 115200);
     create_accessory_name();
-    wifi_config_init("Sonoff Basic", NULL, on_wifi_ready);
+    wifi_config_init("Smart Switch", NULL, on_wifi_ready);
     gpio_init();
 
     if (button_create(button_gpio, 0, 4000, button_callback)) {
         printf("Failed to initialize button\n");
     }
-    
+
     if (toggle_create(toggle_gpio, toggle_callback)) {
         printf("Failed to initialize toggle\n");
     }
-    
+
 }
