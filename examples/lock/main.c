@@ -22,24 +22,28 @@
 #include "button.h"
 
 // The GPIO pin that is connected to a relay
-const int relay_gpio = 12;
+const int relay_gpio1 = 12;
+const int relay_gpio2 = 14;
 // The GPIO pin that is connected to a LED
 // const int led_gpio = 13;
 const int led_gpio = 2;
 // The GPIO pin that is connected to a button
 // const int button_gpio = 0;
-const int button_gpio = 4;
+const int button_gpio = 13;
 
 // Timeout in seconds to open lock for
-const int unlock_period = 5;  // 5 seconds
+const int unlock_period = 2;  // 5 seconds
 // Which signal to send to relay to open the lock (0 or 1)
 const int relay_open_signal = 1;
+
+bool is_enabled = false;
 
 void lock_lock();
 void lock_unlock();
 
 void relay_write(int value) {
-    gpio_write(relay_gpio, value ? 1 : 0);
+    gpio_write(relay_gpio1, value ? 1 : 0);
+    gpio_write(relay_gpio2, value ? 0 : 1);
 }
 
 void led_write(bool on) {
@@ -74,17 +78,27 @@ void reset_configuration_task() {
     vTaskDelete(NULL);
 }
 
+void init_gpio_task() {
+    gpio_enable(relay_gpio2, GPIO_OUTPUT);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_write(relay_gpio1, relay_open_signal ? 0 : 1);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_enable(relay_gpio1, GPIO_OUTPUT);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_write(relay_gpio2, relay_open_signal ? 1 : 0);
+    gpio_enable(led_gpio, GPIO_OUTPUT);
+    led_write(false);
+    vTaskDelete(NULL);
+}
+
+void init_gpio() {
+    printf("Inits gpio\n");
+    xTaskCreate(init_gpio_task, "Init gpio", 256, NULL, 2, NULL);
+}
+
 void reset_configuration() {
     printf("Resetting configuration\n");
     xTaskCreate(reset_configuration_task, "Reset configuration", 256, NULL, 2, NULL);
-}
-
-void gpio_init() {
-    gpio_enable(led_gpio, GPIO_OUTPUT);
-    led_write(false);
-
-    gpio_enable(relay_gpio, GPIO_OUTPUT);
-    relay_write(!relay_open_signal);
 }
 
 void button_callback(uint8_t gpio, button_event_t event) {
@@ -265,7 +279,7 @@ void user_init(void) {
     create_accessory_name();
 
     wifi_config_init("lock", NULL, on_wifi_ready);
-    gpio_init();
+    init_gpio();
     lock_init();
 
     if (button_create(button_gpio, 0, 4000, button_callback)) {
